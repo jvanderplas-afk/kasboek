@@ -1698,7 +1698,7 @@ function txDraftFor(editing) {
     amount: editing ? eur(editing.cents) : "",
     desc: editing ? editing.desc : "",
     cat: editing ? editing.cat : "",
-    parts: editing && txSplit(editing) ? txParts(editing).map(function (p) { return { cat: p.cat, cents: p.cents, label: p.label || "" }; }) : null
+    parts: editing && txSplit(editing) ? txParts(editing).map(function (p) { return { cat: p.cat, cents: p.cents, amount: eur(p.cents), label: p.label || "" }; }) : null
   };
   return txDraft;
 }
