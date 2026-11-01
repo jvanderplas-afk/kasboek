@@ -174,6 +174,17 @@
   fieldset.link { border: 1px solid var(--rule); margin: 0.4rem 0; padding: 0.4rem 0.7rem; }
   fieldset.link label { display: block; font-size: 0.9rem; margin: 0.15rem 0; }
   .pdftext { white-space: pre-wrap; font-size: 0.78rem; max-height: 16rem; overflow: auto; background: var(--paper-2); padding: 0.5rem; }
+  /* gesplitste boekingen */
+  .splitbox { margin: 0.7rem 0 0.9rem; padding: 0.7rem 0.9rem; border: 1px solid #c7b18e; background: #fbf6ec; }
+  .splitbox h3 { margin: 0 0 0.2rem; font-size: 1.02rem; }
+  .splitrows { margin: 0.4rem 0; }
+  .splitrow { display: flex; gap: 0.5rem; align-items: flex-end; flex-wrap: wrap; padding: 0.25rem 0; border-bottom: 1px dotted var(--rule); }
+  .splitrow .f { margin: 0; }
+  .splitrow select, .splitrow input { min-width: 8rem; }
+  .splitsum { margin: 0.35rem 0; }
+  .badge.split { background: #c7b18e; color: #3a2d14; }
+  .parts { margin: 0.15rem 0 0.25rem; line-height: 1.35; }
+  .parts .num { font-weight: 600; }
   .aibtn { margin-left: auto; background: var(--spruce); color: #f6f1e6 !important; border: 0 !important; border-radius: 3px; padding: 0.35rem 0.8rem !important; }
   .aidrawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(460px, 100vw); background: var(--paper, #f7f2e8); border-left: 1px solid var(--line, #ccc); box-shadow: -6px 0 24px rgba(0,0,0,0.18); z-index: 50; display: flex; flex-direction: column; font-family: "Liberation Sans", "Segoe UI", sans-serif; font-size: 0.92rem; }
   @media (min-width: 1500px) { body.aiopen main, body.aiopen nav, body.aiopen header { margin-right: 470px; } }
@@ -382,7 +393,7 @@
       <div class="monogram">NG</div>
       <div>
         <p class="kicker">IJsclub Nooit Gedacht · Wijngaarden</p>
-        <h1>Kasboek<span class="ver">v1.5</span></h1>
+        <h1>Kasboek<span class="ver">v1.6</span></h1>
       </div>
     </div>
     <div class="yearbox">
@@ -444,6 +455,38 @@ var NG = (function () {
   E.txKey = function (date, dir, cents, desc) {
     return [date || "", dir, cents, String(desc || "").trim().toLowerCase().replace(/\s+/g, " ")].join("|");
   };
+  /* ---------- gesplitste boekingen ----------
+     Eén boeking kan uit meerdere delen bestaan: parts = [{cat, cents, label}].
+     Zonder parts is de boeking één geheel (t.cat en t.cents). De som van de delen is altijd t.cents. */
+  E.partsOf = function (t) {
+    if (t && Array.isArray(t.parts) && t.parts.length) {
+      return t.parts.map(function (p) { return { cat: String(p.cat || ""), cents: Math.round(Number(p.cents) || 0), label: String(p.label || "") }; });
+    }
+    return [{ cat: String((t && t.cat) || ""), cents: t ? Math.round(Number(t.cents) || 0) : 0, label: "" }];
+  };
+  E.isSplit = function (t) { return !!(t && Array.isArray(t.parts) && t.parts.length > 1); };
+  E.partsSum = function (parts) { var s = 0; (parts || []).forEach(function (p) { s += Math.round(Number(p && p.cents) || 0); }); return s; };
+  /* keurt een splitsing: minstens twee delen, elk met een rubriek en een bedrag, samen precies het totaal */
+  E.cleanParts = function (parts, total) {
+    var out = [];
+    (parts || []).forEach(function (p) {
+      if (!p) return;
+      var c = Math.round(Number(p.cents) || 0);
+      if (!c) return;
+      out.push({ cat: String(p.cat || ""), cents: c, label: String(p.label || "").trim() });
+    });
+    if (out.length < 2) return null;
+    if (out.some(function (p) { return !p.cat; })) return null;
+    if (E.partsSum(out) !== Math.round(Number(total) || 0)) return null;
+    return out;
+  };
+  /* de grootste deel-rubriek; die blijft als hoofdrubriek op de boeking staan */
+  E.mainCat = function (parts) {
+    var best = null;
+    (parts || []).forEach(function (p) { if (!best || Math.abs(p.cents) > Math.abs(best.cents)) best = p; });
+    return best ? best.cat : "";
+  };
+
   E.bookStart = function (iso) {
     var p = String(iso).split("-").map(Number);
     return p[1] >= 11 ? p[0] : p[0] - 1;
@@ -1282,6 +1325,10 @@ function clone(x) { return JSON.parse(JSON.stringify(x)); }
 function accountLabel(id) { var a = ACCOUNTS.filter(function (x) { return x.id === id; })[0]; return a ? a.label : id; }
 function catByCode(code) { return state.categories.filter(function (c) { return c.code === code; })[0]; }
 function catLabel(code) { if (!code) return "zonder rubriek"; var c = catByCode(code); return c ? c.label : code; }
+/* Een boeking kan uit meerdere delen bestaan (gesplitst). Zonder delen is het één geheel. */
+function txParts(t) { return NG.partsOf(t); }
+function txSplit(t) { return NG.isSplit(t); }
+function partsLabel(t) { return txParts(t).map(function (p) { return catLabel(p.cat) + " " + eur(p.cents); }).join(" · "); }
 function codesMap() { var m = {}; state.categories.forEach(function (c) { m[c.code] = 1; }); return m; }
 function today() { var d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
 function findTx(id) { return state.transactions.filter(function (t) { return t.id === id; })[0]; }
@@ -1608,14 +1655,22 @@ function visibleTx() {
   return txsIn(yearChoice).filter(function (t) {
     if (filters.account && t.account !== filters.account) return false;
     if (filters.dir && t.dir !== filters.dir) return false;
-    if (filters.cat === "__leeg" && t.cat) return false;
-    if (filters.cat === "__auto" && !(t.catBy === "auto" || (!t.cat && t.sug))) return false;
-    if (filters.cat && filters.cat.indexOf("__") !== 0 && t.cat !== filters.cat) return false;
-    if (q && (t.desc + " " + t.cat + " " + catLabel(t.cat)).toLowerCase().indexOf(q) === -1) return false;
+    var ps = txParts(t);
+    if (filters.cat === "__leeg" && ps.some(function (p) { return p.cat; })) return false;
+    if (filters.cat === "__auto" && (txSplit(t) || !(t.catBy === "auto" || (!t.cat && t.sug)))) return false;
+    if (filters.cat && filters.cat.indexOf("__") !== 0 && !ps.some(function (p) { return p.cat === filters.cat; })) return false;
+    if (q) { var hay = t.desc + " " + ps.map(function (p) { return p.cat + " " + catLabel(p.cat) + " " + (p.label || ""); }).join(" "); if (hay.toLowerCase().indexOf(q) === -1) return false; }
     return true;
   }).sort(function (a, b) { var da = a.date || "0000", db = b.date || "0000"; if (da !== db) return da < db ? -1 : 1; return a.id < b.id ? -1 : 1; });
 }
 function rubriekCell(t) {
+  if (txSplit(t)) {
+    var ps = txParts(t);
+    var h0 = '<span class="badge split" title="Deze boeking is over meerdere rubrieken verdeeld">gesplitst</span><div class="parts small">' +
+      ps.map(function (p) { return '<div><span class="num">' + esc(p.cat || "\u2014") + "</span> " + esc(catLabel(p.cat)) + ' <span class="num">' + eur(p.cents) + "</span>" + (p.label ? ' <span class="muted">' + esc(p.label) + "</span>" : "") + "</div>"; }).join("") + "</div>";
+    if (isLocked(t)) return h0;
+    return h0 + '<button type="button" class="linkish small" data-act="edit" data-id="' + esc(t.id) + '">Wijzig verdeling</button>';
+  }
   if (isLocked(t)) return '<span class="num">' + esc(t.cat || "\u2014") + '</span> <span class="small muted">' + esc(t.cat ? catLabel(t.cat) : "") + "</span>";
   var h = '<select data-act="setcat" data-id="' + esc(t.id) + '" aria-label="Rubriek">' + catOptions(t.cat) + "</select>";
   if (t.cat && t.catBy === "auto") h += ' <span class="badge auto" title="' + esc(t.autoWhy || "") + '">auto</span><div class="small muted">' + esc(t.autoWhy || "") + "</div>";
@@ -1633,17 +1688,59 @@ function txRowsHtml(list) {
     return row;
   }).join("");
 }
+/* ---------- concept van het bewerkformulier (blijft staan bij opnieuw tekenen) ---------- */
+var txDraft = null;
+function txDraftFor(editing) {
+  if (!txDraft) txDraft = {
+    date: editing ? editing.date || "" : "",
+    account: editing ? editing.account : "kas",
+    dir: editing ? editing.dir : "in",
+    amount: editing ? eur(editing.cents) : "",
+    desc: editing ? editing.desc : "",
+    cat: editing ? editing.cat : "",
+    parts: editing && txSplit(editing) ? txParts(editing).map(function (p) { return { cat: p.cat, cents: p.cents, label: p.label || "" }; }) : null
+  };
+  return txDraft;
+}
+function splitSum(d) {
+  return (d.parts || []).reduce(function (s, p) { return s + Math.max(0, NG.parseCents(p.amount) || 0); }, 0);
+}
+function splitTotal(d) { return NG.parseCents(d.amount); }
+function splitHtml(d) {
+  var tot = splitTotal(d), som = splitSum(d), h = '<div class="splitbox"><h3>Verdeling over rubrieken <span class="small muted">(gesplitste boeking)</span></h3>';
+  h += '<p class="small muted">Verdeel het bedrag over de rubrieken waar het bij hoort, bijvoorbeeld de huur en de consumpties uit één betaling aan Janine. De delen moeten samen precies op het bedrag uitkomen.</p>';
+  h += '<div class="splitrows">';
+  (d.parts || []).forEach(function (p, i) {
+    h += '<div class="splitrow">';
+    h += '<label class="f">Rubriek<select data-split="cat" data-i="' + i + '">' + catOptions(p.cat, "\u2014 kies rubriek \u2014") + "</select></label>";
+    h += '<label class="f">Bedrag<input type="text" inputmode="decimal" data-split="amount" data-i="' + i + '" value="' + esc(p.amount || "") + '" placeholder="0,00"></label>';
+    h += '<label class="f" style="flex:1;min-width:10rem">Toelichting<input type="text" data-split="label" data-i="' + i + '" value="' + esc(p.label || "") + '" placeholder="bijv. huur ijszaal"></label>';
+    h += '<button type="button" class="linkish" data-act="delsplit" data-i="' + i + '" title="Dit deel weghalen">weghalen</button>';
+    h += "</div>";
+  });
+  h += "</div>";
+  var rest = tot == null ? null : tot - som;
+  h += '<p class="small splitsum" id="splitsum">' + (tot == null ? "Vul eerst het bedrag in." : (rest === 0 ? '<strong class="ok">De delen tellen op tot ' + eur(som) + " \u2713</strong>" : '<strong class="warntext">De delen tellen op tot ' + eur(som) + " van " + eur(tot) + (rest > 0 ? ": nog " + eur(rest) + " te verdelen." : ": " + eur(-rest) + " te veel.") + "</strong>")) + "</p>";
+  h += '<p><button type="button" class="quiet" data-act="addsplit">Deel erbij</button> <button type="button" class="quiet" data-act="nosplit">Niet splitsen (\u00e9\u00e9n rubriek)</button></p></div>';
+  return h;
+}
 function viewBoekingen() {
   var editing = editId ? findTx(editId) : null, list = visibleTx(), closed = yearChoice !== "alles" && isClosed(yearChoice), h = '<section class="sheet">';
   if (closed) h += '<div class="banner">' + lockBadge() + " " + yearLabel(yearChoice) + " is afgesloten: alleen inzien. Deze regels komen uit het vastgestelde jaarverslag.</div>";
   else {
+    var d = txDraftFor(editing);
     h += "<h2>" + (editing ? "Boeking wijzigen" : "Nieuwe boeking") + '</h2><form id="txform" class="rowform" autocomplete="off">';
-    h += '<label class="f">Datum<input type="date" name="date" required value="' + esc(editing ? editing.date || "" : "") + '"></label>';
-    h += '<label class="f">Pot<select name="account">' + accountOptions(editing ? editing.account : "kas") + "</select></label>";
-    h += '<label class="f">Richting<select name="dir"><option value="in"' + (!editing || editing.dir === "in" ? " selected" : "") + '>Inkomsten</option><option value="uit"' + (editing && editing.dir === "uit" ? " selected" : "") + ">Uitgaven</option></select></label>";
-    h += '<label class="f">Bedrag<input type="text" name="amount" inputmode="decimal" placeholder="0,00" required value="' + (editing ? esc(eur(editing.cents)) : "") + '"></label>';
-    h += '<label class="f" style="flex:1;min-width:14rem">Omschrijving<input type="text" name="desc" required value="' + esc(editing ? editing.desc : "") + '"></label>';
-    h += '<label class="f">Rubriek<select name="cat">' + catOptions(editing ? editing.cat : "") + "</select></label>";
+    h += '<label class="f">Datum<input type="date" name="date" required value="' + esc(d.date) + '"></label>';
+    h += '<label class="f">Pot<select name="account">' + accountOptions(d.account) + "</select></label>";
+    h += '<label class="f">Richting<select name="dir"><option value="in"' + (d.dir !== "uit" ? " selected" : "") + '>Inkomsten</option><option value="uit"' + (d.dir === "uit" ? " selected" : "") + ">Uitgaven</option></select></label>";
+    h += '<label class="f">Bedrag<input type="text" name="amount" inputmode="decimal" placeholder="0,00" required value="' + esc(d.amount) + '"></label>';
+    h += '<label class="f" style="flex:1;min-width:14rem">Omschrijving<input type="text" name="desc" required value="' + esc(d.desc) + '"></label>';
+    if (d.parts) h += '<label class="f">Rubriek<span class="small muted">gesplitst, zie hieronder</span></label>';
+    else {
+      h += '<label class="f">Rubriek<select name="cat" data-txf="cat">' + catOptions(d.cat) + "</select></label>";
+      h += '<label class="f">Meerdere rubrieken<span><button type="button" class="quiet" data-act="startsplit">Splitsen</button></span></label>';
+    }
+    if (d.parts) h += splitHtml(d);
     h += '<button type="submit" class="go">' + (editing ? "Bewaar wijziging" : "Zet in het boek") + "</button>" + (editing ? '<button type="button" class="quiet" data-act="canceledit">Annuleer</button>' : "") + "</form>";
     var sg = openSuggestions(yearChoice);
     h += '<div class="autobar"><strong>Automatisch rubriceren</strong> \u00b7 zonder rubriek: ' + (sg.hoog + sg.laag + sg.geen) + " (voorstel zeker " + sg.hoog + ", twijfel " + sg.laag + ", geen voorstel " + sg.geen + ') <button type="button" class="quiet" data-act="runauto">Rubriceer automatisch</button> <button type="button" class="go" data-act="accepthigh"' + (sg.hoog ? "" : " disabled") + ">Neem alle " + sg.hoog + ' zekere voorstellen over</button><div class="small muted">Een voorstel verandert niets tot u het overneemt. Een rubriek die al gekozen is, wordt nooit automatisch vervangen.</div></div>';
@@ -1665,7 +1762,7 @@ function paintRows() {
 function viewVerslag() {
   var y = yearChoice === "alles" ? null : yearChoice, list = txsIn(yearChoice), h = '<section class="sheet"><h2>Jaarverslag ' + esc(yearLabel(yearChoice)) + (y && isClosed(y) ? " " + lockBadge() : "") + "</h2>";
   if (y && SEED.closedReports && SEED.closedReports[y]) h += closedReportHtml(y, list);
-  var pend = list.filter(function (t) { return !t.cat; }).length;
+  var pend = list.filter(function (t) { return txParts(t).some(function (p) { return !p.cat; }); }).length;
   if (pend) h += '<div class="banner">' + pend + ' boekingen hebben nog geen rubriek (vaak met een voorstel). Ze staan onderaan bij \u201cNog niet ingedeeld\u201d. <button type="button" class="linkish" data-act="goto" data-view="boekingen">Naar Boekingen</button></div>';
   if (y) {
     var o = 0, e = 0;
@@ -1674,11 +1771,11 @@ function viewVerslag() {
     h += '<tr class="total"><td>Totaal kasvermogen</td><td class="n num">' + eur(o) + '</td><td class="n num">' + eur(e) + "</td></tr></tbody></table></div>";
   }
   var ri = 0, ru = 0, tr = 0;
-  list.forEach(function (t) { if (NONRESULT[t.cat]) { tr += t.dir === "in" ? t.cents : -t.cents; return; } if (t.dir === "in") ri += t.cents; else ru += t.cents; });
+  list.forEach(function (t) { txParts(t).forEach(function (p) { if (NONRESULT[p.cat]) { tr += t.dir === "in" ? p.cents : -p.cents; return; } if (t.dir === "in") ri += p.cents; else ru += p.cents; }); });
   h += '<div class="callout"><div><h3>Resultaat</h3><p class="small muted">Inkomsten min uitgaven. Opname, storting en correcties (rubriek verschil) verplaatsen geld en tellen niet mee; een boeking zonder rubriek telt wel mee.</p></div><strong class="num ' + (ri - ru < 0 ? "uit" : "in") + '">' + eurEuro(ri - ru) + "</strong></div>";
   h += '<p class="small num">Inkomsten ' + eurEuro(ri) + " \u00b7 uitgaven " + eurEuro(ru) + (tr ? " \u00b7 saldo verschuivingen en correcties (niet in resultaat): " + eurEuro(tr) : "") + "</p>";
   var map = {}, used = {};
-  list.forEach(function (t) { var k = t.cat || ""; if (!map[k]) map[k] = { inn: 0, uit: 0, acc: {} }; if (t.dir === "in") map[k].inn += t.cents; else map[k].uit += t.cents; map[k].acc[t.account] = 1; });
+  list.forEach(function (t) { txParts(t).forEach(function (p) { var k = p.cat || ""; if (!map[k]) map[k] = { inn: 0, uit: 0, acc: {} }; if (t.dir === "in") map[k].inn += p.cents; else map[k].uit += p.cents; map[k].acc[t.account] = 1; }); });
   function row(code, label, b) {
     b = b || { inn: 0, uit: 0, acc: {} };
     return "<tr><td>" + esc(label) + (code ? ' <span class="tag">' + esc(code) + "</span>" : "") + (NONRESULT[code] ? ' <span class="tag">niet in resultaat</span>' : "") + '</td><td class="n num">' + eur(b.inn) + '</td><td class="n num">' + eur(b.uit) + '</td><td class="n num">' + eur(b.inn - b.uit) + '</td><td class="small">' + ACCOUNTS.filter(function (a) { return b.acc[a.id]; }).map(function (a) { return a.label; }).join(", ") + "</td></tr>";
@@ -1698,7 +1795,7 @@ function closedReportHtml(y, list) {
   var h = '<div class="vastgesteld"><h3>Vastgesteld jaarverslag ' + yearLabel(y) + ' <span class="small muted">(\u201cberekening jaarplan\u201d uit het Excel)</span></h3><div class="tablewrap"><table><thead><tr><th>Onderdeel</th><th class="n">Inkomsten</th><th class="n">Uitgaven</th><th class="n">Opbrengst</th><th class="n">Controle boekingen</th></tr></thead><tbody>';
   r.lines.forEach(function (l) {
     if (!l.codes.length) { h += '<tr class="group"><td colspan="5">' + esc(l.label) + "</td></tr>"; return; }
-    var ci = 0, cu = 0; list.forEach(function (t) { if (l.codes.indexOf(t.cat) !== -1) { if (t.dir === "in") ci += t.cents; else cu += t.cents; } });
+    var ci = 0, cu = 0; list.forEach(function (t) { txParts(t).forEach(function (p) { if (l.codes.indexOf(p.cat) !== -1) { if (t.dir === "in") ci += p.cents; else cu += p.cents; } }); });
     var ok = ci === l["in"] && cu === l.uit; if (!ok) allOk = false;
     h += "<tr><td>" + esc(l.label) + ' <span class="tag">' + esc(l.codes.join(", ")) + '</span></td><td class="n num">' + eur(l["in"]) + '</td><td class="n num">' + eur(l.uit) + '</td><td class="n num">' + eur(l.net) + '</td><td class="n ' + (ok ? "ok" : "diff") + '">' + (ok ? "\u2713" : eur(ci - cu)) + "</td></tr>";
   });
@@ -1997,9 +2094,9 @@ function onClick(e) {
   var b = e.target.closest("[data-act]"); if (!b || b.tagName === "SELECT") return;
   var act = b.dataset.act, id = b.dataset.id, t, n, a, p;
   switch (act) {
-    case "goto": view = b.dataset.view; armDelete = null; rememberFor = null; armReset = false; excelArmCats = false; excelArmApply = false; render(); break;
-    case "edit": t = findTx(id); if (t && !isLocked(t)) { editId = id; view = "boekingen"; render(); window.scrollTo(0, 0); } break;
-    case "canceledit": editId = null; render(); break;
+    case "goto": view = b.dataset.view; armDelete = null; rememberFor = null; armReset = false; excelArmCats = false; excelArmApply = false; if (view !== "boekingen") { editId = null; txDraft = null; } render(); break;
+    case "edit": t = findTx(id); if (t && !isLocked(t)) { editId = id; txDraft = null; view = "boekingen"; render(); window.scrollTo(0, 0); } break;
+    case "canceledit": editId = null; txDraft = null; render(); break;
     case "askdel": armDelete = id; paintRows(); break;
     case "nodel": armDelete = null; paintRows(); break;
     case "yesdel":
@@ -2008,6 +2105,15 @@ function onClick(e) {
       state.invoices.forEach(function (i) { if (i.txId === id) i.txId = null; });
       armDelete = null; save(); flash = "Boeking verwijderd."; render(); break;
     case "takesug": t = findTx(id); if (t && t.sug && !isLocked(t)) { t.cat = t.sug.code; t.catBy = "user"; delete t.sug; save(); rememberFor = { txId: t.id, contains: rememberPrefill(t) }; paintRows(); } break;
+    case "startsplit":
+      var dd = txDraftFor(findTx(editId) || null), tot0 = NG.parseCents(dd.amount);
+      dd.parts = tot0 > 0
+        ? [{ cat: dd.cat || "", amount: eur(tot0), label: "" }, { cat: "", amount: "", label: "" }]
+        : [{ cat: dd.cat || "", amount: "", label: "" }, { cat: "", amount: "", label: "" }];
+      render(); break;
+    case "addsplit": dd = txDraftFor(findTx(editId) || null); dd.parts = dd.parts || []; dd.parts.push({ cat: "", amount: "", label: "" }); render(); break;
+    case "delsplit": dd = txDraftFor(findTx(editId) || null); dd.parts.splice(Number(b.dataset.i), 1); if (!dd.parts.length) dd.parts = null; render(); break;
+    case "nosplit": dd = txDraftFor(findTx(editId) || null); dd.parts = null; render(); break;
     case "runauto": a = runAuto(); save(); flash = "Automatisch rubriceren: " + a.hoog + " zeker, " + a.laag + " twijfel, " + a.geen + " zonder voorstel. Er is nog niets overgenomen."; render(); break;
     case "accepthigh": n = acceptHigh(); save(); flash = n + " zekere voorstellen overgenomen (te herkennen aan \u201cauto\u201d)."; render(); break;
     case "saverule":
@@ -2113,17 +2219,38 @@ function onSubmit(e) {
   render();
 }
 function saveTx(form) {
-  var date = form.date.value, account = form.account.value, dir = form.dir.value, cents = NG.parseCents(form.amount.value), desc = form.desc.value.trim(), cat = form.cat.value;
+  var d = txDraftFor(findTx(editId) || null);
+  var date = form.date.value, account = form.account.value, dir = form.dir.value, cents = NG.parseCents(form.amount.value), desc = form.desc.value.trim();
+  var cat = d.parts ? "" : form.cat.value;
   if (!date || !desc) { flash = "Vul datum en omschrijving in."; render(); return; }
   if (isClosed(String(NG.bookStart(date)))) { flash = "Die datum valt in een afgesloten boekjaar (" + yearLabel(String(NG.bookStart(date))) + "). Daar kan niets meer bij."; render(); return; }
   if (cents == null || cents <= 0) { flash = "Het bedrag moet groter zijn dan 0; de richting kiest u apart."; render(); return; }
+  var parts = null;
+  if (d.parts) {
+    var raw = d.parts.map(function (p) { return { cat: p.cat, cents: NG.parseCents(p.amount) || 0, label: p.label }; });
+    parts = NG.cleanParts(raw, cents);
+    if (!parts) {
+      var som = NG.partsSum(raw);
+      flash = som !== cents ? "De verdeling telt op tot " + eur(som) + " en het bedrag is " + eur(cents) + ". Pas de delen aan tot het klopt."
+        : (raw.some(function (p) { return !p.cents; }) ? "Vul bij elk deel een bedrag in." : "Kies bij elk deel een rubriek (minstens twee delen).");
+      render(); return;
+    }
+    cat = NG.mainCat(parts);
+  }
   if (editId) {
     var t = findTx(editId);
-    if (t && !isLocked(t)) { if (t.cat !== cat) { if (cat) t.catBy = "user"; else delete t.catBy; delete t.sug; } t.date = date; t.account = account; t.dir = dir; t.cents = cents; t.desc = desc; t.cat = cat; delete t.by; }
-    editId = null; flash = "Boeking bewaard.";
+    if (t && !isLocked(t)) {
+      if (t.cat !== cat) { if (cat) t.catBy = "user"; else delete t.catBy; delete t.sug; }
+      t.date = date; t.account = account; t.dir = dir; t.cents = cents; t.desc = desc; t.cat = cat; delete t.by;
+      if (parts) t.parts = parts; else delete t.parts;
+      if (parts) { t.catBy = "user"; delete t.sug; }
+    }
+    editId = null; txDraft = null; flash = parts ? "Boeking bewaard, verdeeld over " + parts.length + " rubrieken." : "Boeking bewaard.";
   } else {
-    var n = { id: uid("m"), date: date, account: account, dir: dir, cents: cents, desc: desc, cat: cat, src: "hand" }; if (cat) n.catBy = "user";
-    state.transactions.push(n); flash = "Boeking toegevoegd.";
+    var n = { id: uid("m"), date: date, account: account, dir: dir, cents: cents, desc: desc, cat: cat, src: "hand" };
+    if (parts) n.parts = parts;
+    if (cat) n.catBy = "user";
+    state.transactions.push(n); flash = parts ? "Boeking toegevoegd, verdeeld over " + parts.length + " rubrieken." : "Boeking toegevoegd.";
   }
   save(); render();
 }
@@ -2136,6 +2263,9 @@ function onChange(e) {
     if (el.value) { t.catBy = "user"; delete t.sug; rememberFor = { txId: t.id, contains: rememberPrefill(t) }; } else { delete t.catBy; rememberFor = null; }
     save(); paintRows(); return;
   }
+  var f0 = el.closest && el.closest("#txform");
+  if (f0 && (el.name === "account" || el.name === "dir" || el.name === "cat")) { var dr = txDraftFor(findTx(editId) || null); dr[el.name] = el.value; return; }
+  if (el.dataset.split) { var dd0 = txDraftFor(findTx(editId) || null); (dd0.parts || []).forEach(function (p, i) { if (String(i) === el.dataset.i) p[el.dataset.split] = el.value; }); if (el.dataset.split !== "label") { render(); } return; }
   if (el.dataset.filter) { filters[el.dataset.filter] = el.value; paintRows(); return; }
   if (el.dataset.qf) { intakeField(el, false); return; }
   if (el.id === "inboxon") { inboxToggle(el.checked); return; }
@@ -2153,8 +2283,21 @@ function onChange(e) {
   if ((el.id === "restorefile" || el.id === "startfile" || el.id === "seedfile") && el.files[0]) { var r = el.files[0]; el.value = ""; readRestore(r); }
   if (el.id === "invfiles" && el.files.length) { var fs = Array.prototype.slice.call(el.files); el.value = ""; addFiles(fs); }
 }
+function paintSplitSum() {
+  var el = document.getElementById("splitsum"); if (!el) return;
+  var d = txDraftFor(findTx(editId) || null), tot = splitTotal(d), som = splitSum(d);
+  if (tot == null) { el.innerHTML = "Vul eerst het bedrag in."; return; }
+  var rest = tot - som;
+  el.innerHTML = rest === 0 ? '<strong class="ok">De delen tellen op tot ' + eur(som) + " \u2713</strong>"
+    : '<strong class="warntext">De delen tellen op tot ' + eur(som) + " van " + eur(tot) + (rest > 0 ? ": nog " + eur(rest) + " te verdelen." : ": " + eur(-rest) + " te veel.") + "</strong>";
+}
 function onInput(e) {
   var el = e.target;
+  if (el.tagName === "INPUT") {
+    var f0 = el.closest("#txform");
+    if (f0) { var d0 = txDraftFor(findTx(editId) || null); if (el.name === "amount" || el.name === "date" || el.name === "desc") d0[el.name === "amount" ? "amount" : el.name] = el.value; if (el.dataset.split === "amount") { (d0.parts || []).forEach(function (p, i) { if (String(i) === el.dataset.i) p.amount = el.value; }); paintSplitSum(); } return; }
+    if (el.dataset.split === "amount" || el.dataset.split === "label") { var d1 = txDraftFor(findTx(editId) || null); (d1.parts || []).forEach(function (p, i) { if (String(i) === el.dataset.i) p[el.dataset.split] = el.value; }); if (el.dataset.split === "amount") paintSplitSum(); return; }
+  }
   if (el.dataset.filter === "q") { filters.q = el.value; paintRows(); }
   else if (el.dataset.qf && el.tagName === "INPUT" && el.type === "text") intakeField(el, true);
   else if (el.dataset.pf && el.tagName === "INPUT" && el.type === "text") {
@@ -2324,6 +2467,7 @@ function aiIso(v) { return typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v
 function aiTxView(t) {
   var y = yearOf(t), o = { id: t.id, datum: t.date || null, pot: t.account, richting: t.dir, bedrag: aiEuro(t.cents), omschrijving: aiMask(t.desc), rubriek: t.cat || "", boekjaar: y ? yearLabel(y) : null };
   if (t.cat) o.rubriek_naam = catLabel(t.cat);
+  if (txSplit(t)) { o.gesplitst = true; o.verdeling = txParts(t).map(function (x) { return { rubriek: x.cat, rubriek_naam: x.cat ? catLabel(x.cat) : "zonder rubriek", bedrag: aiEuro(x.cents), toelichting: aiMask(x.label || "") }; }); }
   if (!t.cat && t.sug) o.voorstel = { rubriek: t.sug.code, zekerheid: t.sug.conf === "hoog" ? "zeker" : "twijfel", reden: aiMask(t.sug.why) };
   if (y && isClosed(y)) o.afgesloten = true;
   if (t.dateNote) o.datum_opmerking = aiMask(t.dateNote);
@@ -2350,8 +2494,9 @@ var AI_TOOLS = [
   { name: "saldo_check", description: "Vergelijk per pot het saldo volgens het kasboek met de laatste bankdownload of telling, en geef begin- en eindsaldi van het lopende boekjaar.", parameters: aiP({}) },
   { name: "boeking_toevoegen", description: "STELT VOOR een nieuwe boeking toe te voegen. Wordt pas doorgevoerd na akkoord van de gebruiker.",
     parameters: aiP({ datum: { type: "string", description: "JJJJ-MM-DD" }, pot: AI_STR, richting: { type: "string", enum: ["in", "uit"] }, bedrag: { type: "number", description: "euro, positief" }, omschrijving: AI_STR, rubriek: { type: "string", description: "rubriekcode (mag leeg)" } }, ["datum", "pot", "richting", "bedrag", "omschrijving"]) },
-  { name: "boeking_wijzigen", description: "STELT VOOR een bestaande boeking te wijzigen (alleen opgegeven velden). Wordt pas doorgevoerd na akkoord.",
-    parameters: aiP({ id: { type: "string", description: "id uit zoek_boekingen" }, rubriek: { type: "string", description: "rubriekcode, of '' om leeg te maken" }, omschrijving: AI_STR, bedrag: AI_NUM, datum: AI_STR, pot: AI_STR, richting: { type: "string", enum: ["in", "uit"] } }, ["id"]) },
+  { name: "boeking_wijzigen", description: "STELT VOOR een bestaande boeking te wijzigen (alleen opgegeven velden). Met verdeling splitst u dezelfde boeking over meerdere rubrieken (bijvoorbeeld huur + consumpties uit \u00e9\u00e9n betaling); de bedragen van de verdeling moeten samen op het boekingsbedrag uitkomen. Wordt pas doorgevoerd na akkoord.",
+    parameters: aiP({ id: { type: "string", description: "id uit zoek_boekingen" }, rubriek: { type: "string", description: "rubriekcode, of '' om leeg te maken" }, omschrijving: AI_STR, bedrag: AI_NUM, datum: AI_STR, pot: AI_STR, richting: { type: "string", enum: ["in", "uit"] },
+      verdeling: { type: "array", description: "Zet de boeking over op deze verdeling; leeg of weglaten = niet splitsen", items: aiP({ rubriek: AI_STR, bedrag: AI_NUM, toelichting: AI_STR }, ["rubriek", "bedrag"]) } }, ["id"]) },
   { name: "boeking_verwijderen", description: "STELT VOOR een boeking te verwijderen. Wordt pas doorgevoerd na akkoord.", parameters: aiP({ id: AI_STR, reden: AI_STR }, ["id"]) },
   { name: "rubriek_voorstellen_accepteren", description: "STELT VOOR automatische rubriekvoorstellen over te nemen: voor de opgegeven ids, of voor alle voorstellen in een boekjaar (standaard alleen 'zeker').",
     parameters: aiP({ ids: { type: "array", items: AI_STR }, boekjaar: AI_STR, ook_twijfel: { type: "boolean", description: "ook voorstellen met 'twijfel' (alleen als de gebruiker dat vraagt)" } }) },
@@ -2377,7 +2522,7 @@ function aiFind(a) {
     if (a.richting && t.dir !== a.richting) return false;
     if (a.datum_van && (!t.date || t.date < a.datum_van)) return false;
     if (a.datum_tot && (!t.date || t.date > a.datum_tot)) return false;
-    if (a.rubriek) { if (a.rubriek === "geen") { if (t.cat) return false; } else if (t.cat !== a.rubriek) return false; }
+    if (a.rubriek) { var ps = txParts(t); if (a.rubriek === "geen") { if (ps.some(function (x) { return x.cat; })) return false; } else if (!ps.some(function (x) { return x.cat === a.rubriek; })) return false; }
     if (q && String(t.desc).toLowerCase().indexOf(q) === -1) return false;
     if (cents != null && t.cents !== cents) return false;
     if (mn != null && t.cents < mn) return false;
@@ -2394,10 +2539,10 @@ function aiOverview(a) {
   var pot = a.pot ? aiPot(a.pot) : null, by = a.groepeer || "rubriek", g = {}, res = 0, nonres = 0;
   txsIn(y).forEach(function (t) {
     if (pot && t.account !== pot) return;
-    var k = by === "pot" ? t.account : by === "maand" ? String(t.date || "zonder datum").slice(0, 7) : (t.cat || "geen");
-    var r = g[k] || (g[k] = { in: 0, uit: 0, aantal: 0 });
-    if (t.dir === "in") r.in += t.cents; else r.uit += t.cents; r.aantal++;
-    if (NONRESULT[t.cat]) nonres += t.dir === "in" ? t.cents : -t.cents; else res += t.dir === "in" ? t.cents : -t.cents;
+    var ps = txParts(t), per = {};
+    ps.forEach(function (x) { var k = by === "pot" ? t.account : by === "maand" ? String(t.date || "zonder datum").slice(0, 7) : (x.cat || "geen"); var r = per[k] || (per[k] = { in: 0, uit: 0 }); if (t.dir === "in") r.in += x.cents; else r.uit += x.cents; });
+    Object.keys(per).forEach(function (k) { var r = g[k] || (g[k] = { in: 0, uit: 0, aantal: 0 }); r.in += per[k].in; r.uit += per[k].uit; r.aantal++; });
+    ps.forEach(function (x) { if (NONRESULT[x.cat]) nonres += t.dir === "in" ? x.cents : -x.cents; else res += t.dir === "in" ? x.cents : -x.cents; });
   });
   var rows = Object.keys(g).sort().map(function (k) { var r = g[k], o = {}; o[by] = k; if (by === "rubriek") o.naam = k === "geen" ? "zonder rubriek" : catLabel(k); o.in = aiEuro(r.in); o.uit = aiEuro(r.uit); o.saldo = aiEuro(r.in - r.uit); o.aantal = r.aantal; return o; });
   var saldi = ACCOUNTS.map(function (p) { return { pot: p.id, naam: p.label, begin: aiEuro(opening(y, p.id)), eind: aiEuro(closing(y, p.id)) }; });
@@ -2440,6 +2585,22 @@ function aiEdit(a) {
   if (a.datum) { var d = aiIso(a.datum); if (!d) return aiErr("Ongeldige datum."); if (isClosed(String(NG.bookStart(d)))) return aiErr(aiClosedMsg(String(NG.bookStart(d)))); if (d !== t.date) { after.date = d; delete after.by; delete after.dateText; changed = true; } }
   if (a.pot) { var p = aiPot(a.pot); if (!p) return aiErr("Onbekende pot."); if (p !== t.account) { after.account = p; changed = true; } }
   if (a.richting) { if (a.richting !== "in" && a.richting !== "uit") return aiErr("Richting moet 'in' of 'uit' zijn."); if (a.richting !== t.dir) { after.dir = a.richting; changed = true; } }
+  if (a.verdeling != null) {
+    var raw = [];
+    (Array.isArray(a.verdeling) ? a.verdeling : []).forEach(function (x) {
+      if (!x) return; var cc = aiParseAmount(x.bedrag); raw.push({ cat: String(x.rubriek || ""), cents: cc || 0, label: String(x.toelichting || "") });
+    });
+    if (!raw.length) { if (t.parts) { delete after.parts; changed = true; } }
+    else {
+      var tot = after.cents != null ? after.cents : t.cents, som = NG.partsSum(raw);
+      if (som !== tot) return aiErr("De verdeling telt op tot " + eur(som) + " en het boekingsbedrag is " + eur(tot) + ". Pas de verdeling aan.");
+      var bad = raw.filter(function (x) { return !catByCode(x.cat); })[0];
+      if (bad) return aiErr("Onbekende rubriek in de verdeling: " + (bad.cat || "(leeg)"));
+      var cl = NG.cleanParts(raw, tot);
+      if (!cl) return aiErr("Een verdeling heeft minstens twee delen met een rubriek en een bedrag nodig.");
+      after.parts = cl; after.cat = NG.mainCat(cl); after.catBy = "user"; delete after.sug; changed = true;
+    }
+  }
   if (!changed) return aiErr("Er verandert niets aan deze boeking.");
   if (aiPending && aiPending.changes.some(function (x) { return x.id === t.id && x.type !== "rule" && x.type !== "event"; })) return aiErr("Voor deze boeking staat al een wijziging klaar in dit voorstel. Voeg wijzigingen per boeking samen in één aanroep.");
   return aiPropose({ type: "edit", id: t.id, before: clone(t), after: after });
@@ -2606,13 +2767,14 @@ function aiUndo(id) {
   runAuto();
   return { ok: true, entry: e };
 }
-var AI_FIELD_LABEL = { date: "datum", account: "pot", dir: "richting", cents: "bedrag", desc: "omschrijving", cat: "rubriek" };
+var AI_FIELD_LABEL = { date: "datum", account: "pot", dir: "richting", cents: "bedrag", desc: "omschrijving", cat: "rubriek", parts: "verdeling" };
 function aiFmt(k, v) {
   if (v == null || v === "") return k === "cat" ? "(geen rubriek)" : "\u2014";
   if (k === "cents") return "\u20ac " + eur(v);
   if (k === "date") return nlDate(v);
   if (k === "account") return accountLabel(v);
   if (k === "cat") return v + " \u00b7 " + catLabel(v);
+  if (k === "parts") return (v || []).map(function (p) { return catLabel(p.cat) + " " + eur(p.cents) + (p.label ? " (" + p.label + ")" : ""); }).join(" \u00b7 ") || "(geen verdeling)";
   return String(v);
 }
 function aiDescribe(ch) {
@@ -2620,7 +2782,7 @@ function aiDescribe(ch) {
   var rows = [], title;
   if (ch.type === "add") { title = "Nieuwe boeking"; ["date", "account", "dir", "cents", "desc", "cat"].forEach(function (k) { rows.push({ veld: AI_FIELD_LABEL[k], voor: "\u2014", na: aiFmt(k, ch.after[k]) }); }); }
   else if (ch.type === "delete") { title = "Boeking verwijderen: " + nlDate(ch.before.date) + ", " + ch.before.desc; ["date", "account", "dir", "cents", "desc", "cat"].forEach(function (k) { rows.push({ veld: AI_FIELD_LABEL[k], voor: aiFmt(k, ch.before[k]), na: "(verwijderd)" }); }); }
-  else if (ch.type === "edit") { title = "Boeking " + nlDate(ch.before.date) + ", \u20ac " + eur(ch.before.cents) + ": " + ch.before.desc; ["date", "account", "dir", "cents", "desc", "cat"].forEach(function (k) { if ((ch.before[k] || "") !== (ch.after[k] || "")) rows.push({ veld: AI_FIELD_LABEL[k], voor: aiFmt(k, ch.before[k]), na: aiFmt(k, ch.after[k]) }); }); }
+  else if (ch.type === "edit") { title = "Boeking " + nlDate(ch.before.date) + ", \u20ac " + eur(ch.before.cents) + ": " + ch.before.desc; ["date", "account", "dir", "cents", "desc", "cat"].forEach(function (k) { if ((ch.before[k] || "") !== (ch.after[k] || "")) rows.push({ veld: AI_FIELD_LABEL[k], voor: aiFmt(k, ch.before[k]), na: aiFmt(k, ch.after[k]) }); }); if (JSON.stringify(ch.before.parts || null) !== JSON.stringify(ch.after.parts || null)) rows.push({ veld: "verdeling", voor: aiFmt("parts", ch.before.parts), na: aiFmt("parts", ch.after.parts) }); }
   else if (ch.type === "rule") { title = "Nieuwe regel"; rows.push({ veld: "regel", voor: "\u2014", na: "bevat \u201c" + ch.after.contains + "\u201d" + (ch.after.dir ? " (" + ch.after.dir + ")" : "") + " \u2192 " + aiFmt("cat", ch.after.code) }); }
   else if (ch.type === "event") {
     var b = (ch.before || eventsFor(ch.year)).filter(function (e) { return e.key === ch.key; })[0], a = ch.after.filter(function (e) { return e.key === ch.key; })[0];
@@ -2982,9 +3144,11 @@ function rptUndated(p) { return p.year ? 0 : state.transactions.filter(function 
 function rptAgg(list) {
   var m = {};
   list.forEach(function (t) {
-    var k = t.cat || "";
-    if (!m[k]) m[k] = { inn: { kas: 0, bank: 0, spaar: 0 }, uit: { kas: 0, bank: 0, spaar: 0 }, n: 0 };
-    m[k][t.dir === "in" ? "inn" : "uit"][t.account] += t.cents; m[k].n++;
+    txParts(t).forEach(function (p) {
+      var k = p.cat || "";
+      if (!m[k]) m[k] = { inn: { kas: 0, bank: 0, spaar: 0 }, uit: { kas: 0, bank: 0, spaar: 0 }, n: 0 };
+      m[k][t.dir === "in" ? "inn" : "uit"][t.account] += p.cents; m[k].n++;
+    });
   });
   return m;
 }
@@ -2993,6 +3157,11 @@ function rptSum(agg, codes, side, pot) {
 }
 function rptKnownCodes() { var m = {}; RPT_JV.forEach(function (g) { g.rows.forEach(function (r) { r[1].forEach(function (c) { m[c] = 1; }); }); }); RPT_TRANSFER.forEach(function (r) { r[1].forEach(function (c) { m[c] = 1; }); }); return m; }
 function rptLeftCodes(agg) { var known = rptKnownCodes(); return Object.keys(agg).filter(function (k) { return !known[k]; }).sort(); }
+function rptCatCell(t) {
+  var ps = txParts(t);
+  if (ps.length > 1) return "gesplitst: " + ps.map(function (p) { return (p.cat || "zonder rubriek") + " " + eur(p.cents); }).join(", ");
+  return ps[0] && ps[0].cat ? ps[0].cat + " " + catLabel(ps[0].cat) : "zonder rubriek";
+}
 function rptCatName(code) { return code ? catLabel(code) + " (" + code + ")" : "zonder rubriek"; }
 
 /* ---- model-hulpjes ---- */
@@ -3166,23 +3335,23 @@ function rptMutaties(p, o) {
     rptPots(o).forEach(function (a) {
       var list = rptTxs(p, a.id), b = rptBegin(p, a.id), run = b, ti = 0, tu = 0;
       var rows = [rptRow([p.from, "Beginsaldo", "", null, null, b], "sub")];
-      list.forEach(function (t) { run += t.dir === "in" ? t.cents : -t.cents; if (t.dir === "in") ti += t.cents; else tu += t.cents; rows.push(rptRow([t.date || null, t.desc + (t.date ? "" : " (zonder datum)"), t.cat ? t.cat + " " + catLabel(t.cat) : "zonder rubriek", t.dir === "in" ? t.cents : null, t.dir === "uit" ? t.cents : null, run])); });
+      list.forEach(function (t) { run += t.dir === "in" ? t.cents : -t.cents; if (t.dir === "in") ti += t.cents; else tu += t.cents; rows.push(rptRow([t.date || null, t.desc + (t.date ? "" : " (zonder datum)"), rptCatCell(t), t.dir === "in" ? t.cents : null, t.dir === "uit" ? t.cents : null, run])); });
       rows.push(rptRow([null, "Totaal mutaties (" + list.length + ")", "", ti, tu, null], "sub"));
       rows.push(rptRow([p.to, "Eindsaldo", "", null, null, run], "total"));
       count += list.length;
       r.sections.push(rptSection(RPT_POTNAME[a.id], a.id === "kas" ? "Kas" : a.id === "bank" ? "Bank" : "Spaarplan", [C_DATE(), C_TXT("Omschrijving", 56), C_TXT("Rubriek", 26), C_EUR("Inkomsten"), C_EUR("Uitgaven"), C_EUR("Saldo")], rows));
     });
   } else {
-    var list = rptTxs(p, o.pot || null), groups = {}, order = [];
+    var list = rptTxs(p, o.pot || null), groups = {}, order = [], seen = {};
     state.categories.forEach(function (c) { order.push(c.code); });
-    list.forEach(function (t) { var k = t.cat || ""; (groups[k] = groups[k] || []).push(t); });
+    list.forEach(function (t) { txParts(t).forEach(function (x) { var k = x.cat || ""; (groups[k] = groups[k] || []).push({ t: t, p: x }); }); });
     Object.keys(groups).forEach(function (k) { if (order.indexOf(k) === -1) order.push(k); });
     var rows = [], GI = 0, GU = 0;
     order.forEach(function (k) {
       var g = groups[k]; if (!g) return;
       var run = 0, ti = 0, tu = 0;
       rows.push(rptRow([null, (k ? k + " \u00b7 " + catLabel(k) : "Zonder rubriek") + (NONRESULT[k] ? " (niet in resultaat)" : ""), "", null, null, null], "group"));
-      g.forEach(function (t) { var v = t.dir === "in" ? t.cents : -t.cents; run += v; if (t.dir === "in") ti += t.cents; else tu += t.cents; rows.push(rptRow([t.date || null, t.desc + (t.date ? "" : " (zonder datum)"), accountLabel(t.account), t.dir === "in" ? t.cents : null, t.dir === "uit" ? t.cents : null, run])); });
+      g.forEach(function (x) { var t = x.t, c2 = x.p.cents * (txSplit(t) ? 1 : 1), v = t.dir === "in" ? c2 : -c2; run += v; if (t.dir === "in") ti += c2; else tu += c2; rows.push(rptRow([t.date || null, t.desc + (t.date ? "" : " (zonder datum)") + (txSplit(t) ? " \u2014 deel " + (x.p.label || catLabel(x.p.cat)) : ""), accountLabel(t.account), t.dir === "in" ? c2 : null, t.dir === "uit" ? c2 : null, run])); });
       rows.push(rptRow([null, "Totaal " + (k || "zonder rubriek") + " (" + g.length + ")", "", ti, tu, ti - tu], "sub"));
       GI += ti; GU += tu; count += g.length;
     });
@@ -3198,7 +3367,7 @@ function rptMutaties(p, o) {
 function rptEvenement(p, o) {
   var ev = RPT_EVENTS.filter(function (e) { return e.id === o.evenement; })[0] || RPT_EVENTS[1];
   var r = rptBase("evenement", p, o, "Evenementrapport " + ev.label);
-  var list = rptTxs(p, o.pot || null).filter(function (t) { return ev.codes.indexOf(t.cat) !== -1; }), agg = rptAgg(list);
+  var list = rptTxs(p, o.pot || null).filter(function (t) { return txParts(t).some(function (x) { return ev.codes.indexOf(x.cat) !== -1; }); }), agg = rptAgg(list);
   var info = [], years = p.year ? [p.year] : [String(NG.bookStart(p.from)), String(NG.bookStart(p.to))].filter(function (y, i, a) { return a.indexOf(y) === i; });
   years.forEach(function (y) { eventsFor(y).forEach(function (e) { if (e.key === ev.ev) info.push(rptRow(["Datum " + yearLabel(y), rptLongDate(e.from) + (e.to ? " t/m " + rptLongDate(e.to) : "") + (e.status === "afgeleid" ? " (afgeleid)" : "")])); }); });
   if (ev.id === "kaart") info.push(rptRow(["Datum", "dinsdagavonden in het kaartseizoen (2e week september t/m april)"]));
@@ -3215,7 +3384,13 @@ function rptEvenement(p, o) {
   rows.push(rptRow(["Resultaat " + ev.label, "", ti, tu, ti - tu], "total"));
   r.key = { inn: ti, uit: tu, resultaat: ti - tu, aantal: list.length };
   r.sections.push(rptSection("Inkomsten en uitgaven", "Overzicht", [C_TXT("Onderdeel", 34), C_TXT("Rubriek", 12), C_EUR("Inkomsten"), C_EUR("Uitgaven"), C_EUR("Saldo")], rows));
-  var brows = list.map(function (t) { return rptRow([t.date || null, accountLabel(t.account), t.desc, t.cat, t.dir === "in" ? t.cents : null, t.dir === "uit" ? t.cents : null]); });
+  var brows = [];
+  list.forEach(function (t) {
+    var ps = txParts(t).filter(function (x) { return ev.codes.indexOf(x.cat) !== -1; });
+    var som = txParts(t).length === ps.length ? null : ps.reduce(function (s2, x) { return s2 + x.cents; }, 0);
+    if (ps.length === 1) brows.push(rptRow([t.date || null, accountLabel(t.account), t.desc, ps[0].cat, t.dir === "in" ? ps[0].cents : null, t.dir === "uit" ? ps[0].cents : null]));
+    else ps.forEach(function (x, i) { brows.push(rptRow([i ? null : t.date || null, accountLabel(t.account), (i ? "\u2014 deel van " + t.desc : t.desc) + (x.label ? " \u00b7 " + x.label : ""), x.cat, t.dir === "in" ? x.cents : null, t.dir === "uit" ? x.cents : null])); });
+  });
   if (!brows.length) brows.push(rptRow([null, "", "Geen boekingen voor dit evenement in deze periode.", "", null, null], "muted"));
   else brows.push(rptRow([null, "", "Totaal", "", ti, tu], "total"));
   r.sections.push(rptSection("Boekingen", "Boekingen", [C_DATE(), C_TXT("Pot", 16), C_TXT("Omschrijving", 56), C_TXT("Rubriek", 10), C_EUR("Inkomsten"), C_EUR("Uitgaven")], brows));
@@ -3267,7 +3442,7 @@ function rptKascontrole(p, o) {
   if (!orows.length) orows.push(rptRow(["\u2014", "Geen open posten", null], "muted"));
   r.sections.push(rptSection("Open posten", "Open posten", [C_TXT("Soort", 22), C_TXT("Omschrijving", 50), C_EUR("Bedrag")], orows, { foot: open.note }));
   /* zonder rubriek */
-  var all = rptTxs(p, o.pot || null), nocat = all.filter(function (t) { return !t.cat; });
+  var all = rptTxs(p, o.pot || null), nocat = all.filter(function (t) { return txParts(t).some(function (x) { return !x.cat; }); });
   var doubt = nocat.filter(function (t) { return !t.sug || t.sug.conf !== "hoog"; }), sure = nocat.filter(function (t) { return t.sug && t.sug.conf === "hoog"; });
   var autoCat = all.filter(function (t) { return t.cat && t.catBy === "auto"; });
   function nrow(t) { return rptRow([t.date || null, accountLabel(t.account), t.desc, t.dir === "in" ? t.cents : -t.cents, t.sug ? t.sug.code + " " + catLabel(t.sug.code) : "\u2014", t.sug ? (t.sug.conf === "hoog" ? "zeker" : "twijfel") : "geen voorstel"]); }
@@ -3279,7 +3454,7 @@ function rptKascontrole(p, o) {
   /* factuurdekking */
   var frows = [], F = { n: 0, nm: 0, bm: 0, nz: 0, bz: 0 }, missing = [];
   pots.forEach(function (a) {
-    var u = all.filter(function (t) { return t.account === a.id && t.dir === "uit" && !NONRESULT[t.cat]; }), nm = 0, bm = 0, nz = 0, bz = 0;
+    var u = all.filter(function (t) { return t.account === a.id && t.dir === "uit" && !txParts(t).every(function (x) { return NONRESULT[x.cat]; }); }), nm = 0, bm = 0, nz = 0, bz = 0;
     u.forEach(function (t) { if (t.invoiceId) { nm++; bm += t.cents; } else { nz++; bz += t.cents; if (t.cents >= 10000) missing.push(t); } });
     F.n += u.length; F.nm += nm; F.bm += bm; F.nz += nz; F.bz += bz;
     frows.push(rptRow([accountLabel(a.id), u.length, nm, bm, nz, bz, u.length ? Math.round(100 * nm / u.length) + "%" : "\u2014"]));
@@ -3290,7 +3465,7 @@ function rptKascontrole(p, o) {
     { foot: "Uitgaven zonder opnamen, stortingen en correcties. \u201cMet factuur\u201d = gekoppeld via het tabblad Facturen." }));
   missing.sort(function (a, b) { return b.cents - a.cents || rptSort(a, b); });
   r.sections.push(rptSection("Uitgaven vanaf \u20ac 100 zonder gekoppelde factuur (" + missing.length + ")", "Facturen", [C_DATE(), C_TXT("Pot", 16), C_TXT("Omschrijving", 54), C_TXT("Rubriek", 22), C_EUR("Bedrag")],
-    missing.length ? missing.map(function (t) { return rptRow([t.date || null, accountLabel(t.account), t.desc, t.cat ? t.cat + " " + catLabel(t.cat) : "zonder rubriek", t.cents]); }) : [rptRow([null, "", "Geen", "", null], "muted")]));
+    missing.length ? missing.map(function (t) { return rptRow([t.date || null, accountLabel(t.account), t.desc, rptCatCell(t), t.cents]); }) : [rptRow([null, "", "Geen", "", null], "muted")]));
   r.statement = "De kascommissie heeft de boekhouding over " + p.long + " gecontroleerd aan de hand van dit rapport, de bankafschriften, de kastelling en de facturen.";
   return r;
 }
@@ -3634,8 +3809,8 @@ function jvSummary(y) {
   JV_POTS.forEach(function (a) { S.begin[a] = opening(y, a); S.eind[a] = closing(y, a); });
   var oi = rptOpenItems(p); S.open = oi.ontvangen - oi.betalen; S.openN = oi.list.length;
   S.monthly = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-  list.forEach(function (t) { var d = rptEffDate(t); if (t.cat === "krtbar" && t.dir === "in" && d) S.monthly[jvMonth(d)] += t.cents; });
-  S.nocat = list.filter(function (t) { return !t.cat; }).length;
+  list.forEach(function (t) { var d = rptEffDate(t); if (!d) return; var krt = txParts(t).filter(function (x) { return x.cat === "krtbar"; }).reduce(function (s2, x) { return s2 + x.cents; }, 0); if (krt && t.dir === "in") S.monthly[jvMonth(d)] += krt; });
+  S.nocat = list.filter(function (t) { return txParts(t).some(function (x) { return !x.cat; }); }).length;
   return jvFinish(S);
 }
 function jvSummaryHist(y, H) {
@@ -4663,6 +4838,12 @@ async function excelRead(u8, fileName) {
 }
 
 /* ---------- 2. vergelijken ---------- */
+function excelFlatten(t) {
+  /* voor de vergelijking telt elk deel van een gesplitste boeking als eigen regel (zo staat het ook in het Excel) */
+  var ps = txParts(t);
+  if (ps.length === 1) return [{ t: t, key: t.id, part: null, cat: ps[0].cat, cents: ps[0].cents, desc: t.desc, date: t.date, dir: t.dir }];
+  return ps.map(function (p, i) { return { t: t, key: t.id + "#" + i, part: i, cat: p.cat, cents: p.cents, desc: t.desc + (p.label ? " \u00b7 " + p.label : ""), date: t.date, dir: t.dir, label: p.label || "" }; });
+}
 function excelAnalyse(res) {
   var y = String(res.year), A = { year: y, pots: {}, counts: { excel: 0, gelijk: 0, datum: 0, rubriek: 0, beide: 0, alleenExcel: 0, alleenApp: 0, anderePot: 0, matched: 0 }, checks: [] };
   var appAll = state.transactions.filter(function (t) { return yearOf(t) === y; }), used = {};
@@ -4670,15 +4851,17 @@ function excelAnalyse(res) {
     var g = res.pots[pot] || { begin: 0, rows: [] };
     var app = appAll.filter(function (t) { return t.account === pot; });
     var idx = app.map(function (t, i) { return i; }), vrije = {}, paar = [], pairs = [], alleen = [];
-    app.forEach(function (t, i) { vrije[i] = 1; });
+    var flat = [], flatByTx = {};
+    app.forEach(function (t) { var f = excelFlatten(t); flatByTx[t.id] = f; f.forEach(function (x) { flat.push(x); }); });
+    flat.forEach(function (x, i) { vrije[i] = 1; });
     function gelijk(a, b) { return String(a || "").toLowerCase().replace(/\s+/g, " ").trim() === String(b || "").toLowerCase().replace(/\s+/g, " ").trim(); }
     function pak(e, alleenDatum) {
-      var kandidaten = idx.filter(function (i) { var t = app[i]; return vrije[i] && t.dir === e.dir && t.cents === e.cents && (!alleenDatum || (e.date && t.date === e.date)); });
+      var kandidaten = flat.map(function (x, i) { return i; }).filter(function (i) { var x = flat[i]; return vrije[i] && x.dir === e.dir && x.cents === e.cents && (!alleenDatum || (e.date && x.date === e.date)); });
       if (!kandidaten.length) return -1;
-      var zelfde = kandidaten.filter(function (i) { return gelijk(app[i].desc, e.desc); });
+      var zelfde = kandidaten.filter(function (i) { return gelijk(flat[i].desc, e.desc) || gelijk(flat[i].label, e.desc) || (flat[i].desc && e.desc && gelijk(flat[i].desc.split(" \u00b7 ")[0], e.desc.split(":")[0])); });
       if (zelfde.length) return zelfde[0];
       if (e.date) {
-        var dichtbij = kandidaten.filter(function (i) { return app[i].date && Math.abs(NG.dayDiff(app[i].date, e.date)) <= 14; }).sort(function (a, b) { return Math.abs(NG.dayDiff(app[a].date, e.date)) - Math.abs(NG.dayDiff(app[b].date, e.date)); });
+        var dichtbij = kandidaten.filter(function (i) { return flat[i].date && Math.abs(NG.dayDiff(flat[i].date, e.date)) <= 14; }).sort(function (a, b) { return Math.abs(NG.dayDiff(flat[a].date, e.date)) - Math.abs(NG.dayDiff(flat[b].date, e.date)); });
         if (dichtbij.length) return dichtbij[0];
         return -1;
       }
@@ -4686,14 +4869,15 @@ function excelAnalyse(res) {
     }
     /* eerst de regels die precies kloppen, daarna de rest (datum wijkt af).
        Let op: één Excel-rij kan zowel een inkomst als een uitgave hebben, dus niet op rijnummer matchen. */
-    g.rows.forEach(function (e, k) { var i = pak(e, true); if (i >= 0) { vrije[i] = 0; paar[k] = app[i]; used[app[i].id] = 1; } });
-    g.rows.forEach(function (e, k) { if (paar[k]) return; var i = pak(e, false); if (i >= 0) { vrije[i] = 0; paar[k] = app[i]; used[app[i].id] = 1; } });
+    g.rows.forEach(function (e, k) { var i = pak(e, true); if (i >= 0) { vrije[i] = 0; paar[k] = flat[i]; used[flat[i].t.id] = 1; } });
+    g.rows.forEach(function (e, k) { if (paar[k]) return; var i = pak(e, false); if (i >= 0) { vrije[i] = 0; paar[k] = flat[i]; used[flat[i].t.id] = 1; } });
     g.rows.forEach(function (e, k) {
-      var t = paar[k];
-      if (!t) { alleen.push(e); return; }
+      var f = paar[k];
+      if (!f) { alleen.push(e); return; }
+      var t = f.t;
       var dateDiff = !!(e.date && t.date && e.date !== t.date), catDiff = null;
-      if (e.cat && (t.cat || "") !== e.cat) catDiff = { app: t.cat || "", excel: e.cat };
-      pairs.push({ e: e, t: t, dateDiff: dateDiff, catDiff: catDiff, status: dateDiff && catDiff ? "beide" : dateDiff ? "datum" : catDiff ? "rubriek" : "gelijk" });
+      if (e.cat && (f.cat || "") !== e.cat) catDiff = { app: f.cat || "", excel: e.cat };
+      pairs.push({ e: e, t: t, f: f, part: f.part, dateDiff: dateDiff, catDiff: catDiff, status: dateDiff && catDiff ? "beide" : dateDiff ? "datum" : catDiff ? "rubriek" : "gelijk" });
     });
     var inn = 0, uit = 0;
     g.rows.forEach(function (x) { if (x.dir === "in") inn += x.cents; else uit += x.cents; });
@@ -4722,7 +4906,8 @@ function excelAnalyse(res) {
   EXCEL_POTS.forEach(function (pot) {
     var P = A.pots[pot], c = { excel: P.rows, matched: P.pairs.length, gelijk: 0, datum: 0, rubriek: 0, beide: 0, alleenExcel: P.alleen.length, alleenApp: 0, anderePot: P.andere.length };
     P.pairs.forEach(function (p) { c[p.status]++; });
-    P.alleenApp = leftover.filter(function (t) { return t.account === pot; });
+    var seenApp = {};
+    P.alleenApp = leftover.filter(function (t) { if (t.account !== pot || seenApp[t.id]) return false; seenApp[t.id] = 1; return true; });
     c.alleenApp = P.alleenApp.length;
     P.c = c;
     var ct = [c.gelijk + " gelijk"];
@@ -4738,7 +4923,7 @@ function excelAnalyse(res) {
       if (p.status === "gelijk") return;
       var w = [];
       if (p.dateDiff) w.push("datum: Excel " + excelD(p.e) + ", kasboek " + nlDate(p.t.date));
-      if (p.catDiff) w.push("rubriek: kasboek " + excelCatName(p.catDiff.app) + " \u2192 Excel " + excelCatName(p.catDiff.excel));
+      if (p.catDiff) w.push("rubriek: kasboek " + excelCatName(p.catDiff.app) + " \u2192 Excel " + excelCatName(p.catDiff.excel) + (p.part != null ? " (deel van een gesplitste boeking)" : ""));
       P.diffs.push({ d: p.e.date, dtxt: p.e.dateText, desc: p.e.desc || p.t.desc || "", cents: p.e.cents, what: w.join(" \u00b7 ") });
     });
     P.alleen.forEach(function (e) { P.diffs.push({ d: e.date, dtxt: e.dateText, desc: e.desc, cents: e.cents, what: "staat alleen in het Excel" + (e.cat ? " (rubriek " + excelCatName(e.cat) + ")" : "") }); });
@@ -4854,7 +5039,10 @@ function excelTakeCats() {
     A.pots[pot].pairs.forEach(function (p) {
       if (!p.catDiff || !p.catDiff.excel) return;
       if (isLocked(p.t)) return;
-      p.t.cat = p.catDiff.excel;
+      if (p.part != null && p.t.parts && p.t.parts[p.part]) {
+        p.t.parts[p.part].cat = p.catDiff.excel;
+        p.t.cat = NG.mainCat(p.t.parts);
+      } else p.t.cat = p.catDiff.excel;
       p.t.catBy = "excel";
       delete p.t.sug;
       n++;
