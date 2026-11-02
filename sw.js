@@ -1,5 +1,5 @@
 /* Kasboek Nooit Gedacht: service worker. Bevat geen clubgegevens. */
-var CACHE = "kasboek-v1.7-ab01bc4516";
+var CACHE = "kasboek-v1.8-c84f0ed503";
 var CDN_CACHE = "kasboek-cdn-v1";
 var CORE = ["./", "./index.html", "./manifest.webmanifest", "./icons/icon-192.png", "./icons/icon-512.png", "./icons/icon-maskable-192.png", "./icons/icon-maskable-512.png", "./icons/apple-touch-icon.png", "./icons/favicon-32.png"];
 var CDN_HOSTS = ["cdnjs.cloudflare.com", "cdn.jsdelivr.net", "tessdata.projectnaptha.com", "unpkg.com"];
